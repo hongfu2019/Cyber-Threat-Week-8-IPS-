@@ -1,0 +1,47 @@
+// 1) Last 10 minutes: classify normal vs abnormal
+DetectSecurityAnomalies()
+| project timestamp, device, os, user, client_ip, process_norm, pid, event, severity, activity_type, abnormal_reason
+| order by timestamp desc
+
+// 2) Only abnormal records for alerting
+DetectSecurityAnomalies()
+| where activity_type == 'Abnormal'
+| project timestamp, device, os, user, ip = client_ip, process = process_norm, pid, event, severity, abnormal_reason, alert_key
+| order by timestamp desc
+
+// 3) Abnormal count by username
+DetectSecurityAnomalies()
+| summarize abnormal_events=count() by user=user_norm
+| order by abnormal_events desc
+
+// 4) Abnormal count by process ID
+DetectSecurityAnomalies()
+| where activity_type == 'Abnormal'
+| summarize abnormal_events=count() by pid
+| order by abnormal_events desc
+
+// 5) Abnormal count by IP address
+DetectSecurityAnomalies()
+| where activity_type == 'Abnormal'
+| summarize abnormal_events=count() by ip=client_ip
+| order by abnormal_events desc
+
+// 6) Failed logins over threshold within 5 minutes
+SecurityLogs
+| where timestamp >= ago(5m)
+| where event has 'failed' or status =~ 'abnormal'
+| extend client_ip = coalesce(ip, src_ip)
+| summarize fail_count=count(), users=make_set(user, 20), pids=make_set(pid, 20) by client_ip, device
+| where fail_count >= 5
+| order by fail_count desc
+
+// 7) Baseline posture KPI query
+SecurityLogs
+| where timestamp >= ago(1h)
+| summarize 
+    TotalEvents=count(),
+    NormalEvents=countif(status =~ 'normal'),
+    AbnormalEvents=countif(status =~ 'abnormal' or event has 'failed' or severity in ('high','critical')),
+    DistinctUsers=dcount(user),
+    DistinctIPs=dcount(coalesce(ip, src_ip)),
+    DistinctDevices=dcount(device)

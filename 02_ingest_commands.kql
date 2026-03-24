@@ -1,0 +1,45 @@
+// Replace placeholders before running.
+// JSON arrays can be ingested with format='json'. JSON Lines / multiline JSON can be ingested with format='multijson'.
+
+.ingest into table SecurityLogs (
+  h'https://<storage-account>.blob.core.windows.net/<container>/windows_security_logs_10000.jsonl?<sas-token>'
+)
+with (
+  format='multijson',
+  ingestionMapping='SecurityLogsJsonMap',
+  ingestionMappingType='json'
+)
+
+.ingest into table SecurityLogs (
+  h'https://<storage-account>.blob.core.windows.net/<container>/mac_security_logs_10000.jsonl?<sas-token>'
+)
+with (
+  format='multijson',
+  ingestionMapping='SecurityLogsJsonMap',
+  ingestionMappingType='json'
+)
+
+.ingest into table SecurityLogs (
+  h'https://<storage-account>.blob.core.windows.net/<container>/linux_security_logs_10000.jsonl?<sas-token>'
+)
+with (
+  format='multijson',
+  ingestionMapping='SecurityLogsJsonMap',
+  ingestionMappingType='json'
+)
+
+// Optional: ingest the merged file instead of the three source files.
+.ingest into table SecurityLogs (
+  h'https://<storage-account>.blob.core.windows.net/<container>/merged_security_logs_30000.json?<sas-token>'
+)
+with (
+  format='json',
+  ingestionMapping='SecurityLogsJsonMap',
+  ingestionMappingType='json'
+)
+
+// Validation checks
+SecurityLogs | count
+SecurityLogs | summarize count() by os
+SecurityLogs | summarize count() by status
+SecurityLogs | take 10

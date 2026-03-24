@@ -1,0 +1,15 @@
+// Optional but recommended: persist abnormal detections to SecurityAlerts every time data lands in SecurityLogs.
+// This uses an update policy so the dashboard and alerting table stay current.
+
+.alter table SecurityAlerts policy update @'[{
+  "IsEnabled": true,
+  "Source": "SecurityLogs",
+  "Query": "SecurityLogs | where timestamp >= ago(1d) | extend client_ip = coalesce(ip, src_ip) | extend user_norm = iff(isempty(user), 'unknown', tostring(user)) | extend process_norm = iff(isempty(process), 'unknown', tostring(process)) | extend status_norm = iff(isempty(status), 'unknown', tostring(status)) | extend abnormal_reason = case(status_norm =~ 'abnormal', 'Source flagged abnormal', event has 'failed', 'Failed authentication', event has 'bruteforce', 'Brute-force indicator', event has 'malware', 'Malware-related event', user_norm in ('unknown','unauthorised','unauthorized','disabled'), 'Suspicious username', client_ip startswith '203.' or client_ip startswith '198.51.100.' or client_ip startswith '45.' or client_ip startswith '103.', 'Suspicious source IP', process_norm in ('powershell.exe','cmd.exe','bash','sh','zsh','python','python3','wscript.exe','cscript.exe','sshd'), 'Sensitive process observed', severity in ('high','critical'), 'High severity event', 'Normal') | where abnormal_reason != 'Normal' | project alert_time=now(), source_timestamp=timestamp, device, os, user=user_norm, ip=client_ip, process=process_norm, pid, event, severity, abnormal_reason, alert_key=tostring(hash(strcat(tostring(timestamp), '|', device, '|', user_norm, '|', client_ip, '|', process_norm, '|', tostring(pid), '|', abnormal_reason))), raw_record",
+  "IsTransactional": false,
+  "PropagateIngestionProperties": true
+}]'
+
+// Check current alerts
+SecurityAlerts
+| where source_timestamp >= ago(1h)
+| order by source_timestamp desc

@@ -1,0 +1,79 @@
+// Run in your ADX database
+
+.create-merge table SecurityLogs (
+    timestamp: datetime,
+    device: string,
+    os: string,
+    user: string,
+    event: string,
+    ip: string,
+    process: string,
+    pid: long,
+    severity: string,
+    status: string,
+    src_ip: string,
+    dst_ip: string,
+    protocol: string,
+    message: string,
+    raw_record: dynamic
+)
+
+.create-or-alter table SecurityLogs ingestion json mapping 'SecurityLogsJsonMap' '[
+  {"column":"timestamp","path":"$.timestamp","datatype":"datetime"},
+  {"column":"device","path":"$.device","datatype":"string"},
+  {"column":"os","path":"$.os","datatype":"string"},
+  {"column":"user","path":"$.user","datatype":"string"},
+  {"column":"event","path":"$.event","datatype":"string"},
+  {"column":"ip","path":"$.ip","datatype":"string"},
+  {"column":"process","path":"$.process","datatype":"string"},
+  {"column":"pid","path":"$.pid","datatype":"long"},
+  {"column":"severity","path":"$.severity","datatype":"string"},
+  {"column":"status","path":"$.status","datatype":"string"},
+  {"column":"src_ip","path":"$.src_ip","datatype":"string"},
+  {"column":"dst_ip","path":"$.dst_ip","datatype":"string"},
+  {"column":"protocol","path":"$.protocol","datatype":"string"},
+  {"column":"message","path":"$.message","datatype":"string"},
+  {"column":"raw_record","path":"$","datatype":"dynamic"}
+]'
+
+.create-merge table SecurityAlerts (
+    alert_time: datetime,
+    source_timestamp: datetime,
+    device: string,
+    os: string,
+    user: string,
+    ip: string,
+    process: string,
+    pid: long,
+    event: string,
+    severity: string,
+    abnormal_reason: string,
+    alert_key: string,
+    raw_record: dynamic
+)
+
+.create-or-alter function with (
+    folder = 'detections',
+    docstring = 'Returns normal vs abnormal activity from SecurityLogs'
+)
+DetectSecurityAnomalies() {
+    SecurityLogs
+    | where timestamp >= ago(10m)
+    | extend client_ip = coalesce(ip, src_ip)
+    | extend user_norm = iff(isempty(user), 'unknown', tostring(user))
+    | extend process_norm = iff(isempty(process), 'unknown', tostring(process))
+    | extend status_norm = iff(isempty(status), 'unknown', tostring(status))
+    | extend abnormal_reason = case(
+        status_norm =~ 'abnormal', 'Source flagged abnormal',
+        event has 'failed', 'Failed authentication',
+        event has 'bruteforce', 'Brute-force indicator',
+        event has 'malware', 'Malware-related event',
+        user_norm in ('unknown','unauthorised','unauthorized','disabled'), 'Suspicious username',
+        client_ip startswith '203.' or client_ip startswith '198.51.100.' or client_ip startswith '45.' or client_ip startswith '103.', 'Suspicious source IP',
+        process_norm in ('powershell.exe','cmd.exe','bash','sh','zsh','python','python3','wscript.exe','cscript.exe','sshd'), 'Sensitive process observed',
+        severity in ('high','critical'), 'High severity event',
+        'Normal'
+    )
+    | extend activity_type = iff(abnormal_reason == 'Normal', 'Normal', 'Abnormal')
+    | extend alert_key = tostring(hash(strcat(tostring(timestamp), '|', device, '|', user_norm, '|', client_ip, '|', process_norm, '|', tostring(pid), '|', abnormal_reason)))
+}

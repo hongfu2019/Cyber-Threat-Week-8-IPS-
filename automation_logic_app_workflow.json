@@ -1,0 +1,115 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "logicAppName": {"type": "string", "defaultValue": "la-adx-cyber-alerts"},
+    "adxClusterUri": {"type": "string", "defaultValue": "https://<cluster>.<region>.kusto.windows.net"},
+    "adxDatabase": {"type": "string", "defaultValue": "<database>"},
+    "emailTo": {"type": "string", "defaultValue": "<adx-admin-email>"}
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('logicAppName')]",
+      "location": "australiaeast",
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {},
+          "triggers": {
+            "Recurrence": {
+              "type": "Recurrence",
+              "recurrence": {
+                "frequency": "Minute",
+                "interval": 5
+              }
+            }
+          },
+          "actions": {
+            "Run_ADX_Query": {
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "@{concat(parameters('adxClusterUri'), '/v2/rest/query')}",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "db": "@parameters('adxDatabase')",
+                  "csl": "DetectSecurityAnomalies() | where activity_type == 'Abnormal' | where timestamp >= ago(5m) | project timestamp, user=user_norm, ip=client_ip, process=process_norm, pid, event, severity, abnormal_reason"
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://kusto.kusto.windows.net"
+                }
+              },
+              "runAfter": {}
+            },
+            "Parse_Result": {
+              "type": "ParseJson",
+              "inputs": {
+                "content": "@body('Run_ADX_Query')",
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "runAfter": {
+                "Run_ADX_Query": ["Succeeded"]
+              }
+            },
+            "Condition_Has_Abnormal": {
+              "type": "If",
+              "expression": {
+                "greater": [
+                  "@length(body('Run_ADX_Query')?['Tables'][0]?['Rows'])",
+                  0
+                ]
+              },
+              "actions": {
+                "Send_an_email_(V2)": {
+                  "type": "ApiConnection",
+                  "inputs": {
+                    "method": "post",
+                    "host": {
+                      "connection": {
+                        "name": "@parameters('$connections')['office365']['connectionId']"
+                      }
+                    },
+                    "path": "/v2/Mail",
+                    "body": {
+                      "To": "@parameters('emailTo')",
+                      "Subject": "ADX alert: abnormal activity detected",
+                      "Body": "<p>Abnormal traffic was detected in the last 5 minutes.</p><p>Review the Logic App run output and ADX dashboard for details.</p><pre>@{string(body('Run_ADX_Query')?['Tables'][0]?['Rows'])}</pre>",
+                      "Importance": "High"
+                    }
+                  }
+                }
+              },
+              "else": {
+                "actions": {}
+              },
+              "runAfter": {
+                "Parse_Result": ["Succeeded"]
+              }
+            }
+          },
+          "outputs": {}
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "office365": {
+                "connectionId": "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Web/connections/office365",
+                "connectionName": "office365",
+                "id": "/subscriptions/<subscription-id>/providers/Microsoft.Web/locations/australiaeast/managedApis/office365"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

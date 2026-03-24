@@ -1,0 +1,53 @@
+// Tile 1: Security posture scorecard
+SecurityLogs
+| where timestamp >= ago(1h)
+| summarize 
+    TotalEvents=count(),
+    NormalEvents=countif(status =~ 'normal'),
+    AbnormalEvents=countif(status =~ 'abnormal' or event has 'failed' or severity in ('high','critical')),
+    HighSeverity=countif(severity in ('high','critical')),
+    DistinctUsers=dcount(user),
+    DistinctIPs=dcount(coalesce(ip, src_ip)),
+    DistinctDevices=dcount(device)
+
+// Tile 2: Event volume over time (stacked area or time chart)
+SecurityLogs
+| where timestamp >= ago(4h)
+| summarize Events=count() by bin(timestamp, 5m), status
+| order by timestamp asc
+
+// Tile 3: Abnormal events over time
+DetectSecurityAnomalies()
+| where activity_type == 'Abnormal'
+| summarize AbnormalEvents=count() by bin(timestamp, 5m), abnormal_reason
+| order by timestamp asc
+
+// Tile 4: Top suspicious users
+DetectSecurityAnomalies()
+| where activity_type == 'Abnormal'
+| summarize Events=count() by user=user_norm
+| top 10 by Events desc
+
+// Tile 5: Top suspicious IPs
+DetectSecurityAnomalies()
+| where activity_type == 'Abnormal'
+| summarize Events=count() by ip=client_ip
+| top 10 by Events desc
+
+// Tile 6: Top suspicious processes
+DetectSecurityAnomalies()
+| where activity_type == 'Abnormal'
+| summarize Events=count() by process=process_norm
+| top 10 by Events desc
+
+// Tile 7: Abnormal events by OS
+DetectSecurityAnomalies()
+| where activity_type == 'Abnormal'
+| summarize Events=count() by os
+| order by Events desc
+
+// Tile 8: Latest alert table
+SecurityAlerts
+| where source_timestamp >= ago(24h)
+| project source_timestamp, device, os, user, ip, process, pid, event, severity, abnormal_reason
+| order by source_timestamp desc
